@@ -204,8 +204,8 @@ KhepriBase.b_line(b::FRCAD, ps, mat) =
 KhepriBase.b_polygon(b::FRCAD, ps, mat) =
 	@remote(b, line(ps, true, mat))
 
-KhepriBase.b_nurbs_curve(b::FRCAD, order, ps, knots, weights, closed, mat) =
-  @remote(b, nurbs(order, ps, closed, mat))
+KhepriBase.b_nurbs_curve(b::FRCAD, ps, order, cps, knots, weights, closed, mat) =
+  @remote(b, nurbs(order, cps, closed, mat))
 
 KhepriBase.b_trig(b::FRCAD, p1, p2, p3, mat) =
   @remote(b, trig(p1, p2, p3, mat))
