@@ -71,8 +71,8 @@ def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
 def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
 def new_mirror_material(name:str, color:RGBA)->MatId:
 def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
-def spline(ps:List[Point3d], closed:bool, mat:MatId)->Id:
-def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
+def draft_circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
+def draft_spline(ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
 def quad(p1:Point3d, p2:Point3d, p3:Point3d, p4:Point3d, mat:MatId)->Id:
@@ -202,10 +202,14 @@ KhepriBase.b_line(b::FRCAD, ps, mat) =
   @remote(b, line(ps, false, mat))
 
 KhepriBase.b_polygon(b::FRCAD, ps, mat) =
-	@remote(b, line(ps, true, mat))
+  @remote(b, line(ps, true, mat))
 
-KhepriBase.b_nurbs_curve(b::FRCAD, ps, order, cps, knots, weights, closed, mat) =
-  @remote(b, nurbs(order, cps, closed, mat))
+KhepriBase.b_spline(b::FRCAD, ps, v1, v2, mat) =
+  #HACK: ignoring v1, v2
+  @remote(b, draft_spline(ps, false, mat))
+
+KhepriBase.b_closed_spline(b::FRCAD, ps, mat) =
+  @remote(b, draft_spline(ps, true, mat))
 
 KhepriBase.b_trig(b::FRCAD, p1, p2, p3, mat) =
   @remote(b, trig(p1, p2, p3, mat))
@@ -355,11 +359,6 @@ KhepriBase.b_all_shapes_in_layer(b::FRCAD, layer) =
 KhepriBase.b_delete_all_shapes_in_layer(b::FRCAD, layer) =
   @remote(b, delete_all_shapes_in_collection(layer))
 
-realize(b::FRCAD, s::EmptyShape) =
-  FRCADEmptyRef()
-realize(b::FRCAD, s::UniversalShape) =
-  FRCADUniversalRef()
-
 KhepriBase.b_set_view(b::FRCAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, set_view(camera, target, lens))
 
@@ -370,11 +369,11 @@ KhepriBase.b_zoom_extents(b::FRCAD) = @remote(b, ZoomExtents())
 
 KhepriBase.b_set_view_top(b::FRCAD) = @remote(b, ViewTop())
 
-KhepriBase.b_set_time_place(b::FRCAD, date, latitude, longitude, elevation, meridian) =
-  @remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
-
-KhepriBase.b_set_sky(b::FRCAD, turbidity, sun) =
-  @remote(b, set_sky(turbidity)) #Add withsun
+# KhepriBase.b_set_time_place(b::FRCAD, date, latitude, longitude, elevation, meridian) =
+#   @remote(b, set_sun(latitude, longitude, elevation, year(date), month(date), day(date), hour(date)+minute(date)/60, meridian, false))
+#
+# KhepriBase.b_set_sky(b::FRCAD, turbidity, sun) =
+#   @remote(b, set_sky(turbidity)) #Add withsun
 
 KhepriBase.b_delete_ref(b::FRCAD, r::FRCADId) =
   @remote(b, delete_shape(r))
@@ -382,252 +381,7 @@ KhepriBase.b_delete_ref(b::FRCAD, r::FRCADId) =
 KhepriBase.b_delete_all_refs(b::FRCAD) =
   @remote(b, delete_all_shapes())
 
-#=
-backend_set_length_unit(b::FRCAD, unit::String) = @remote(b, SetLengthUnit(unit))
-
-# Dimensions
-
-const FRCADDimensionStyles = Dict(:architectural => "_ARCHTICK", :mechanical => "")
-
-backend_dimension(b::FRCAD, p0::Loc, p1::Loc, p::Loc, scale::Real, style::Symbol) =
-    @remote(b, CreateAlignedDimension(p0, p1, p,
-        scale,
-        FRCADDimensionStyles[style]))
-
-backend_dimension(b::FRCAD, p0::Loc, p1::Loc, sep::Real, scale::Real, style::Symbol) =
-    let v = p1 - p0
-        angle = pol_phi(v)
-        dimension(p0, p1, add_pol(p0, sep, angle + pi/2), scale, style, b)
-    end
-
-# Blocks
-
-realize(b::FRCAD, s::Block) =
-    @remote(b, CreateBlockFromShapes(s.name, collect_ref(s.shapes)))
-
-realize(b::FRCAD, s::BlockInstance) =
-    @remote(b, CreateBlockInstance(
-        collect_ref(s.block)[1],
-        center_scaled_cs(s.loc, s.scale, s.scale, s.scale)))
-=#
-#=
-
-# Manual process
-@time for i in 1:1000 for r in 1:10 circle(x(i*10), r) end end
-
-# Create block...
-Khepri.create_block("Foo", [circle(radius=r) for r in 1:10])
-
-# ...and instantiate it
-@time for i in 1:1000 Khepri.instantiate_block("Foo", x(i*10), 0) end
-
-=#
-#=
-# Lights
-KhepriBase.b_pointlight(b::FRCAD, loc::Loc, color::RGB, range::Real, intensity::Real) =
-  # HACK: Fix this
-  @remote(b, SpotLight(loc, intensity, range, loc+vz(-1)))
-
-KhepriBase.b_spotlight(b::FRCAD, loc::Loc, dir::Vec, hotspot::Real, falloff::Real) =
-    @remote(b, SpotLight(loc, hotspot, falloff, loc + dir))
-
-KhepriBase.b_ieslight(b::FRCAD, file::String, loc::Loc, dir::Vec, alpha::Real, beta::Real, gamma::Real) =
-    @remote(b, IESLight(file, loc, loc + dir, vxyz(alpha, beta, gamma)))
-
-# User Selection
-
-backend_shape_from_ref(b::FRCAD, r) =
-  let c = connection(b),
-      code = @remote(b, ShapeCode(r)),
-      ref = DynRefs(b=>FRCADRef(r))
-    if code == 1 # Point
-        point(@remote(b, PointPosition(r)),
-              ref=ref)
-    elseif code == 2
-        circle(loc_from_o_vz(@remote(b, CircleCenter(r)), @remote(b, CircleNormal(r))),
-               @remote(b, CircleRadius(r)),
-               ref=ref)
-    elseif 3 <= code <= 6
-        line(@remote(b, LineVertices(r)),
-             ref=ref)
-    elseif code == 7
-        let tans = @remote(b, SplineTangents(r))
-            if length(tans[1]) < 1e-20 && length(tans[2]) < 1e-20
-                closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
-                              ref=ref)
-            else
-                spline(@remote(b, SplineInterpPoints(r)), tans[1], tans[2],
-                       ref=ref)
-            end
-        end
-    elseif code == 9
-        let start_angle = mod(@remote(b, ArcStartAngle(r)), 2pi),
-            end_angle = mod(@remote(b, ArcEndAngle(r)), 2pi)
-            arc(loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                @remote(b, ArcRadius(r)), start_angle, mod(end_angle - start_angle, 2pi),
-                ref=ref)
-        #=    if end_angle > start_angle
-                arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                    @remote(b, ArcRadius(r)), start_angle, end_angle - start_angle,
-                    ref=ref)
-            else
-                arc(maybe_loc_from_o_vz(@remote(b, ArcCenter(r)), @remote(b, ArcNormal(r))),
-                    @remote(b, ArcRadius(r)), end_angle, start_angle - end_angle,
-                    ref=ref)
-            end=#
-        end
-    elseif code == 10
-        let str = @remote(b, TextString(r)),
-            height = @remote(b, TextHeight(r)),
-            loc = @remote(b, TextPosition(r))
-            text(str, loc, height, ref=ref)
-        end
-    elseif code == 11
-        let str = @remote(b, MTextString(r)),
-            height = @remote(b, MTextHeight(r)),
-            loc = @remote(b, MTextPosition(r))
-            text(str, loc, height, ref=ref)
-        end
-    elseif code == 16
-        let pts = @remote(b, MeshVertices(r)),
-            (type, n, m, n_closed, m_closed) = @remote(b, PolygonMeshData(r))
-            surface_grid(reshape(pts, (n, m)), n_closed == 1, m_closed == 1, ref=ref)
-        end
-    elseif 12 <= code <= 14
-        surface(Shapes1D[], ref=ref)
-    elseif 103 <= code <= 106
-        polygon(@remote(b, LineVertices(r)),
-                ref=ref)
-    elseif code == 107
-        closed_spline(@remote(b, SplineInterpPoints(r))[1:end-1],
-                      ref=ref)
-    else
-        #unknown(ref=ref)
-        unknown(r, ref=ref) # To force copy
-        #error("Unknown shape with code $(code)")
-    end
-  end
-#
-=#
-#=
-In case we need to realize an Unknown shape, we just copy it
-=#
-#=
-realize(b::FRCAD, s::Unknown) =
-    @remote(b, Copy(s.baseref))
-
-
-
-backend_select_position(b::FRCAD, prompt::String) =
-  begin
-    @info "$(prompt) on the $(b) backend."
-    let ans = @remote(b, GetPosition(prompt))
-      length(ans) > 0 ? ans[1] : nothing
-    end
-  end
-
-backend_select_positions(b::FRCAD, prompt::String) =
-  let sel() =
-    let p = select_position(prompt, b)
-      if p == nothing
-        []
-      else
-        [p, sel()...]
-      end
-    end
-    sel()
-  end
-
-
-# HACK: The next operations should receive a set of shapes to avoid re-creating already existing shapes
-
-backend_select_point(b::FRCAD, prompt::String) =
-  select_one_with_prompt(prompt, b, @get_remote b GetPoint)
-backend_select_points(b::FRCAD, prompt::String) =
-  select_many_with_prompt(prompt, b, @get_remote b GetPoints)
-
-backend_select_curve(b::FRCAD, prompt::String) =
-  select_one_with_prompt(prompt, b, @get_remote b GetCurve)
-backend_select_curves(b::FRCAD, prompt::String) =
-  select_many_with_prompt(prompt, b, @get_remote b GetCurves)
-
-backend_select_surface(b::FRCAD, prompt::String) =
-  select_one_with_prompt(prompt, b, @get_remote b GetSurface)
-backend_select_surfaces(b::FRCAD, prompt::String) =
-  select_many_with_prompt(prompt, b, @get_remote b GetSurfaces)
-
-backend_select_solid(b::FRCAD, prompt::String) =
-  select_one_with_prompt(prompt, b, @get_remote b GetSolid)
-backend_select_solids(b::FRCAD, prompt::String) =
-  select_many_with_prompt(prompt, b, @get_remote b GetSolids)
-
-backend_select_shape(b::FRCAD, prompt::String) =
-  select_one_with_prompt(prompt, b, @get_remote b GetShape)
-backend_select_shapes(b::FRCAD, prompt::String) =
-  select_many_with_prompt(prompt, b, @get_remote b GetShapes)
-
-backend_captured_shape(b::FRCAD, handle) =
-  backend_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
-backend_captured_shapes(b::FRCAD, handles) =
-  map(handles) do handle
-      backend_shape_from_ref(b, @remote(b, GetShapeFromHandle(handle)))
-  end
-
-backend_generate_captured_shape(b::FRCAD, s::Shape) =
-    println("captured_shape(freecad, $(@remote(b, GetHandleFromShape(ref(s).value))))")
-backend_generate_captured_shapes(b::FRCAD, ss::Shapes) =
-  begin
-    print("captured_shapes(freecad, [")
-    for s in ss
-      print(@remote(b, GetHandleFromShape(ref(s).value)))
-      print(", ")
-    end
-    println("])")
-  end
-
-# Register for notification
-
-backend_register_shape_for_changes(b::FRCAD, s::Shape) =
-    let conn = connection(b)
-        @remote(b, RegisterForChanges(ref(s).value))
-        @remote(b, DetectCancel())
-        s
-    end
-
-backend_unregister_shape_for_changes(b::FRCAD, s::Shape) =
-    let conn = connection(b)
-        @remote(b, UnregisterForChanges(ref(s).value))
-        @remote(b, UndetectCancel())
-        s
-    end
-
-backend_waiting_for_changes(b::FRCAD, s::Shape) =
-    ! @remote(b, WasCanceled())
-
-backend_changed_shape(b::FRCAD, ss::Shapes) =
-    let conn = connection(b)
-        changed = []
-        while length(changed) == 0 && ! @remote(b, WasCanceled())
-            changed =  @remote(b, ChangedShape())
-            sleep(0.1)
-        end
-        if length(changed) > 0
-            backend_shape_from_ref(b, changed[1])
-        else
-            nothing
-        end
-    end
-
-
-# HACK: This should be filtered on the plugin, not here.
-backend_all_shapes(b::FRCAD) =
-  Shape[backend_shape_from_ref(b, r)
-        for r in filter(r -> @remote(b, ShapeCode(r)) != 0, @remote(b, GetAllShapes()))]
-
-backend_all_shapes_in_layer(b::FRCAD, layer) =
-  Shape[backend_shape_from_ref(b, r) for r in @remote(b, GetAllShapesInLayer(layer))]
-
-=#
+####################
 
 KhepriBase.b_highlight_ref(b::FRCAD, r::FRCADId) =
   @remote(b, select_shape(r))
@@ -637,33 +391,8 @@ KhepriBase.b_unhighlight_ref(b::FRCAD, r::FRCADId) =
 
 KhepriBase.b_unhighlight_all_refs(b::FRCAD) =
   @remote(b, deselect_all_shapes())
-#=
-backend_pre_selected_shapes_from_set(ss::Shapes) =
-  length(ss) == 0 ? [] : pre_selected_shapes_from_set(ss, backend(ss[1]))
 
-# HACK: This must be implemented for all backends
-backend_pre_selected_shapes_from_set(ss::Shapes, b::Backend) = []
-
-backend_pre_selected_shapes_from_set(b::FRCAD, ss::Shapes) =
-  let refs = map(id -> @remote(b, GetHandleFromShape(id)), @remote(b, GetPreSelectedShapes()))
-    filter(s -> @remote(b, GetHandleFromShape(ref(s).value)) in refs, ss)
-  end
-backend_disable_update(b::FRCAD) =
-  @remote(b, DisableUpdate())
-
-backend_enable_update(b::FRCAD) =
-  @remote(b, EnableUpdate())
-
-# Render
-
-#render exposure: [-3, +3] -> [-6, 21]
-convert_render_exposure(b::FRCAD, v::Real) = -4.05*v + 8.8
-#render quality: [-1, +1] -> [+1, +50]
-convert_render_quality(b::FRCAD, v::Real) = round(Int, 25.5 + 24.5*v)
-
-=#
-
-KhepriBase.b_render_view(b::FRCAD, path::String) =
+KhepriBase.b_render_and_save_view(b::FRCAD, path::String) =
   let (camera, target, lens) = @remote(b, get_view())
     @remote(b, set_camera_view(camera, target, lens))
     @remote(b, set_render_size(render_width(), render_height()))
