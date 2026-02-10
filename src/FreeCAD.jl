@@ -54,7 +54,7 @@ decode(ns::Val{:FRCAD}, t::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c),
       decode(ns, Val(:Vector3d), c)))
 
-freecad_api = @remote_functions :FRCAD """
+freecad_api = @remote_api :FRCAD """
 def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
 def get_current_collection()->str:
 def set_current_collection(name:str)->None:
@@ -172,19 +172,19 @@ KhepriBase.retry_connecting(b::FRCAD) =
 KhepriBase.after_connecting(b::FRCAD) =
   begin
 	starting_freecad(false)
-	# #set_material(freecad, material_basic, )
-	# set_material(freecad, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
-	# #set_material(freecad, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
-	# set_material(freecad, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
-	# set_material(freecad, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
-	# #set_material(freecad, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
-	# set_material(freecad, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
-	# set_material(freecad, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
+	# #set_material(b, material_basic, )
+	# set_material(b, material_metal, "asset_base_id:f1774cb0-b679-46b4-879e-e7223e2b4b5f asset_type:material")
+	# #set_material(b, material_glass, "asset_base_id:ee2c0812-17f5-40d4-992c-68c5a66261d7 asset_type:material")
+	# set_material(b, material_glass, "asset_base_id:ffa3c281-6184-49d8-b05e-8c6e9fe93e68 asset_type:material")
+	# set_material(b, material_wood, "asset_base_id:d5097824-d5a1-4b45-ab5b-7b16bdc5a627 asset_type:material")
+	# #set_material(b, material_concrete, "asset_base_id:0662b3bf-a762-435d-9407-e723afd5eafc asset_type:material")
+	# set_material(b, material_concrete, "asset_base_id:df1161da-050c-4638-b376-38ced992ec18 asset_type:material")
+	# set_material(b, material_plaster, "asset_base_id:c674137d-cfae-45f1-824f-e85dc214a3af asset_type:material")
 	#
-	# #set_material(freecad, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
-	# #set_material(freecad, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
-	# set_material(freecad, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
-	# set_material(freecad, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
+	# #set_material(b, material_grass, "asset_base_id:97b171b4-2085-4c25-8793-2bfe65650266 asset_type:material")
+	# #set_material(b, material_grass, "asset_base_id:7b05be22-6bed-4584-a063-d0e616ddea6a asset_type:material")
+	# set_material(b, material_grass, "asset_base_id:b4be2338-d838-433b-9f0d-2aa9b97a0a8a asset_type:material")
+	# set_material(b, material_clay, b -> b_plastic_material(b, "Clay", rgb(0.9, 0.9, 0.9),	1.0))
 	# We will use the same view as Rhino
 	b_set_view(b, xyz(43.11,-74.67,49.78), xyz(-0.19,0.33,-0.22), 50, 22)
   end
@@ -194,7 +194,7 @@ const freecad = FRCAD("FreeCAD", freecad_port, freecad_api)
 KhepriBase.has_boolean_ops(::Type{FRCAD}) = HasBooleanOps{true}()
 
 KhepriBase.backend(::FRCADRef) = freecad
-KhepriBase.void_ref(b::FRCAD) = FRCADRef(-1 % Int32)
+KhepriBase.void_ref(b::FRCAD) = -1 % Int32
 
 # Primitives
 
@@ -350,9 +350,9 @@ freecad_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4),
 
 KhepriBase.b_layer(b::FRCAD, name, active, color) =
   @remote(b, find_or_create_collection(name, active, color))
-KhepriBase.b_current_layer(b::FRCAD) =
+KhepriBase.b_current_layer_ref(b::FRCAD) =
   @remote(b, get_current_collection())
-KhepriBase.b_current_layer(b::FRCAD, layer) =
+KhepriBase.b_current_layer_ref(b::FRCAD, layer) =
   @remote(b, set_current_collection(layer))
 KhepriBase.b_all_shapes_in_layer(b::FRCAD, layer) =
   @remote(b, all_shapes_in_collection(layer))
@@ -378,7 +378,7 @@ KhepriBase.b_set_view_top(b::FRCAD) = @remote(b, ViewTop())
 KhepriBase.b_delete_ref(b::FRCAD, r::FRCADId) =
   @remote(b, delete_shape(r))
 
-KhepriBase.b_delete_all_refs(b::FRCAD) =
+KhepriBase.b_delete_all_shape_refs(b::FRCAD) =
   @remote(b, delete_all_shapes())
 
 ####################
