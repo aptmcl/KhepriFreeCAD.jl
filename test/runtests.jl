@@ -14,9 +14,7 @@ using Test
     @test isdefined(KhepriFreeCAD, :FRCADKey)
     @test KhepriFreeCAD.FRCADId === Union{Int32, String}
     @test isdefined(KhepriFreeCAD, :FRCADRef)
-    @test isdefined(KhepriFreeCAD, :FRCADEmptyRef)
-    @test isdefined(KhepriFreeCAD, :FRCADUnionRef)
-    @test isdefined(KhepriFreeCAD, :FRCADSubtractionRef)
+    @test KhepriFreeCAD.FRCADRef === NativeRef{KhepriFreeCAD.FRCADKey, Union{Int32, String}}
     @test KhepriFreeCAD.FRCAD === SocketBackend{KhepriFreeCAD.FRCADKey, Union{Int32, String}}
   end
 
