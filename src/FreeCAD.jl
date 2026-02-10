@@ -113,10 +113,6 @@ const FRCADId = Union{Int32,String} # Although shapes and materials are ints, la
 const FRCADIds = Vector{FRCADId}
 const FRCADRef = NativeRef{FRCADKey, FRCADId}
 const FRCADRefs = Vector{FRCADRef}
-const FRCADEmptyRef = EmptyRef{FRCADKey, FRCADId}
-const FRCADUniversalRef = UniversalRef{FRCADKey, FRCADId}
-const FRCADUnionRef = UnionRef{FRCADKey, FRCADId}
-const FRCADSubtractionRef = SubtractionRef{FRCADKey, FRCADId}
 const FRCAD = SocketBackend{FRCADKey, FRCADId}
 
 const KhepriServerPath = Parameter(abspath(@__DIR__, "FreeCADServer.py"))
