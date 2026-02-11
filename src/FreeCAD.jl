@@ -272,7 +272,7 @@ KhepriBase.b_sphere(b::FRCAD, c, r, mat) =
 
 # BIM
 
-KhepriBase.b_wall(b::FRCAD, w_path, w_height, l_thickness, r_thickness, family) =
+KhepriBase.b_wall(b::FRCAD, w_path, w_height, family, offset, openings) =
   path_length(w_path) < path_tolerance() ?
   	void_ref(b) :
     @remote(b, wall(path_vertices(w_path), w_height, "Center", -1))
