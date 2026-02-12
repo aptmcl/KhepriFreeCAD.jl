@@ -20,4 +20,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/aptmcl/KhepriFreeCAD.jl",
+    devbranch="master",
 )
