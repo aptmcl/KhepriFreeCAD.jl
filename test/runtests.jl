@@ -6,6 +6,7 @@
 
 using KhepriFreeCAD
 using KhepriBase
+using KhepriBase: SocketBackend, NativeRef
 using Test
 
 @testset "KhepriFreeCAD.jl" begin
