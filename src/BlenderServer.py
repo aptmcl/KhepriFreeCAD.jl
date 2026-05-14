@@ -350,12 +350,15 @@ def add_bm_uvs(mesh, bm):
 # We should be using Ints for layers!
 # HACK!!! Missing color!!!!!
 current_collection = C.collection
-def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
+def find_or_create_collection(name:str, visible:bool, color:RGBA)->str:
     if name not in D.collections:
         collection = D.collections.new(name)
-        collection.hide_viewport = not active
+        collection.hide_viewport = not visible
         C.scene.collection.children.link(collection)
     return name
+
+def set_collection_visible(name:str, visible:bool)->None:
+    D.collections[name].hide_viewport = not visible
 
 def get_current_collection()->str:
     return current_collection.name

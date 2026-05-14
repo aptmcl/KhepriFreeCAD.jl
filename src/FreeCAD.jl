@@ -55,7 +55,8 @@ decode(ns::Val{:FRCAD}, t::Val{:Frame3d}, c::IO) =
       decode(ns, Val(:Vector3d), c)))
 
 freecad_api = @remote_api :FRCAD """
-def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
+def find_or_create_collection(name:str, visible:bool, color:RGBA)->str:
+def set_collection_visible(name:str, visible:bool)->None:
 def get_current_collection()->str:
 def set_current_collection(name:str)->None:
 def delete_all_shapes_in_collection(name:str)->None:
@@ -273,7 +274,7 @@ KhepriBase.b_sphere(b::FRCAD, c, r, mat) =
 # BIM
 
 KhepriBase.b_wall(b::FRCAD, w_path, w_height, family, offset, openings) =
-  path_length(w_path) < path_tolerance() ?
+  path_length(w_path) < coincidence_tolerance() ?
   	void_ref(b) :
     @remote(b, wall(path_vertices(w_path), w_height, "Center", -1))
 
@@ -344,8 +345,10 @@ Default families
 export freecad_family_materials
 freecad_family_materials(m1, m2=m1, m3=m2, m4=m3) = (materials=(m1, m2, m3, m4), )
 
-KhepriBase.b_layer(b::FRCAD, name, active, color) =
-  @remote(b, find_or_create_collection(name, active, color))
+KhepriBase.b_layer(b::FRCAD, name, visible, color) =
+  @remote(b, find_or_create_collection(name, visible, color))
+KhepriBase.b_set_layer_visible(b::FRCAD, layer, visible) =
+  @remote(b, set_collection_visible(layer, visible))
 KhepriBase.b_current_layer_ref(b::FRCAD) =
   @remote(b, get_current_collection())
 KhepriBase.b_current_layer_ref(b::FRCAD, layer) =
