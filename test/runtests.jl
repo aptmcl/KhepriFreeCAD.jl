@@ -33,4 +33,27 @@ using Test
   @testset "Exported helpers" begin
     @test isdefined(KhepriFreeCAD, :freecad_family_materials)
   end
+
+  @testset "Exact geometry capabilities" begin
+    @test KhepriBase.supports_exact_interpolating_spline_curves(KhepriFreeCAD.FRCAD)
+    @test KhepriBase.supports_exact_bezier_curves(KhepriFreeCAD.FRCAD)
+    @test KhepriBase.supports_exact_bspline_curves(KhepriFreeCAD.FRCAD)
+    @test KhepriBase.supports_exact_nurbs_curves(KhepriFreeCAD.FRCAD)
+    @test !KhepriBase.supports_exact_polycurves(KhepriFreeCAD.FRCAD)
+    @test KhepriBase.supports_exact_bezier_surfaces(KhepriFreeCAD.FRCAD)
+    @test KhepriBase.supports_exact_bspline_surfaces(KhepriFreeCAD.FRCAD)
+    @test KhepriBase.supports_exact_nurbs_surfaces(KhepriFreeCAD.FRCAD)
+    @test !KhepriBase.supports_exact_trimmed_surfaces(KhepriFreeCAD.FRCAD)
+  end
+
+  if get(ENV, "KHEPRI_FREECAD_EXACT_GEOMETRY_TESTS", "0") == "1"
+    @testset "Exact Geometry (FreeCAD)" begin
+      include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "ExactGeometrySmokeTests.jl"))
+      using .ExactGeometrySmokeTests
+
+      delete_all_shapes()
+      backend(freecad)
+      run_exact_geometry_smoke_tests(freecad; verify_samples=false, verify_surface_samples=false)
+    end
+  end
 end

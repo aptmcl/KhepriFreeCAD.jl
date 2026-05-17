@@ -143,6 +143,47 @@ def face_with_holes(pss):
 
 def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
     return addObject("Part::Line", closed_wire(ps) if closed else wire(ps))
+
+def knot_values_and_multiplicities(knots):
+    values = []
+    multiplicities = []
+    for knot in knots:
+        if values and abs(values[-1] - knot) < 1e-12:
+            multiplicities[-1] += 1
+        else:
+            values.append(knot)
+            multiplicities.append(1)
+    return values, multiplicities
+
+def rational_weights(weights, expected):
+    return len(weights) == expected and any(abs(w - 1.0) > 1e-12 for w in weights)
+
+def bspline_curve_from_data(controlPoints, degree, knots, weights, closed):
+    knot_values, knot_mults = knot_values_and_multiplicities(knots)
+    curve = Part.BSplineCurve()
+    if rational_weights(weights, len(controlPoints)):
+        curve.buildFromPolesMultsKnots(controlPoints, knot_mults, knot_values, closed, degree, weights)
+    else:
+        curve.buildFromPolesMultsKnots(controlPoints, knot_mults, knot_values, closed, degree)
+    return curve
+
+def bezier_knots(n):
+    return [0.0] * n + [1.0] * n
+
+def bezier_curve(controlPointss:List[List[Point3d]], closed:bool, mat:MatId)->Id:
+    edges = []
+    for controlPoints in controlPointss:
+        degree = len(controlPoints) - 1
+        curve = bspline_curve_from_data(controlPoints, degree, bezier_knots(degree + 1), [], False)
+        edges.append(curve.toShape())
+    shape = edges[0] if len(edges) == 1 else Part.Wire(edges)
+    return addObject("Part::Line", shape)
+
+def bspline_curve(controlPoints:List[Point3d], degree:int, knots:List[float], closed:bool, mat:MatId)->Id:
+    return addObject("Part::Line", bspline_curve_from_data(controlPoints, degree, knots, [], closed).toShape())
+
+def nurbs_curve(controlPoints:List[Point3d], degree:int, knots:List[float], weights:List[float], closed:bool, mat:MatId)->Id:
+    return addObject("Part::Line", bspline_curve_from_data(controlPoints, degree, knots, weights, closed).toShape())
 # def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
 #     #print(order, ps, closed)
 #     id, name = new_id()
@@ -183,22 +224,62 @@ def quad_strip(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
 
 def quad_strip_closed(ps:List[Point3d], qs:List[Point3d], smooth:bool, mat:MatId)->Id:
     return addObject("Part::Feature", Part.makeShell(quad_strip_closed_faces(ps, qs)))
-#
-# def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool, smooth:bool, mat:MatId)->Id:
-#     faces = []
-#     if closed_u:
-#         for i in range(0, nv-1):
-#             faces.extend(quad_strip_closed_faces(i*nu, nu))
-#         if closed_v:
-#             faces.extend([[p, p+1, q+1, q] for (p, q) in zip(range((nv-1)*nu,nv*nu-1), range(0, nu-1))])
-#             faces.append([nv*nu-1, (nv-1)*nu, 0, nu-1])
-#     else:
-#         for i in range(0, nv-1):
-#             faces.extend(quad_strip_faces(i*nu, nu))
-#         if closed_v:
-#             faces.extend([[p, p+1, q+1, q] for (p, q) in zip(range((nv-1)*nu,nv*nu), range(0, nu))])
-#     return objmesh(ps, [], faces, smooth, mat)
-#
+
+def quad_surface_faces(nu, nv, closed_u, closed_v):
+    faces = []
+    u_last = nu if closed_u else nu - 1
+    v_last = nv if closed_v else nv - 1
+    for i in range(0, u_last):
+        for j in range(0, v_last):
+            i1 = (i + 1) % nu
+            j1 = (j + 1) % nv
+            faces.append((i * nv + j,
+                          i1 * nv + j,
+                          i1 * nv + j1,
+                          i * nv + j1))
+    return faces
+
+def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool, smooth:bool, mat:MatId)->Id:
+    faces = [face([ps[i] for i in idx]) for idx in quad_surface_faces(nu, nv, closed_u, closed_v)]
+    return addObject("Part::Feature", Part.makeShell(faces))
+
+def point_grid(points, nU, nV):
+    return [points[i * nV:(i + 1) * nV] for i in range(0, nU)]
+
+def weight_grid(weights, nU, nV):
+    return [weights[i * nV:(i + 1) * nV] for i in range(0, nU)]
+
+def bspline_surface_from_data(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, weights, closedU, closedV):
+    u_values, u_mults = knot_values_and_multiplicities(knotsU)
+    v_values, v_mults = knot_values_and_multiplicities(knotsV)
+    poles = point_grid(controlPoints, nU, nV)
+    surface = Part.BSplineSurface()
+    if rational_weights(weights, len(controlPoints)):
+        surface.buildFromPolesMultsKnots(
+            poles, u_mults, v_mults, u_values, v_values,
+            closedU, closedV, degreeU, degreeV, weight_grid(weights, nU, nV))
+    else:
+        surface.buildFromPolesMultsKnots(
+            poles, u_mults, v_mults, u_values, v_values,
+            closedU, closedV, degreeU, degreeV)
+    return surface
+
+def bezier_surface(controlPoints:List[Point3d], nU:int, nV:int, closedU:bool, closedV:bool, mat:MatId)->Id:
+    surface = bspline_surface_from_data(
+        controlPoints, nU, nV, nU - 1, nV - 1,
+        bezier_knots(nU), bezier_knots(nV), [], closedU, closedV)
+    return addObject("Part::Feature", surface.toShape())
+
+def bspline_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int,
+                    knotsU:List[float], knotsV:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
+    surface = bspline_surface_from_data(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, [], closedU, closedV)
+    return addObject("Part::Feature", surface.toShape())
+
+def nurbs_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int,
+                  knotsU:List[float], knotsV:List[float], weights:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
+    surface = bspline_surface_from_data(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, weights, closedU, closedV)
+    return addObject("Part::Feature", surface.toShape())
+
 def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
     n = len(ps)-1
     faces = [face([ps[i], ps[i+1], pivot]) for i in range(0, n)]

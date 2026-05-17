@@ -72,6 +72,9 @@ def new_metal_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
 def new_glass_material(name:str, color:RGBA, roughness:float, ior:float)->MatId:
 def new_mirror_material(name:str, color:RGBA)->MatId:
 def line(ps:List[Point3d], closed:bool, mat:MatId)->Id:
+def bezier_curve(controlPointss:List[List[Point3d]], closed:bool, mat:MatId)->Id:
+def bspline_curve(controlPoints:List[Point3d], degree:int, knots:List[float], closed:bool, mat:MatId)->Id:
+def nurbs_curve(controlPoints:List[Point3d], degree:int, knots:List[float], weights:List[float], closed:bool, mat:MatId)->Id:
 def draft_circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
 def draft_spline(ps:List[Point3d], closed:bool, mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
@@ -83,6 +86,9 @@ def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
 def polygon(ps:List[Point3d], mat:MatId)->Id:
 def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
 def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool, smooth:bool, mat:MatId)->Id:
+def bezier_surface(controlPoints:List[Point3d], nU:int, nV:int, closedU:bool, closedV:bool, mat:MatId)->Id:
+def bspline_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int, knotsU:List[float], knotsV:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
+def nurbs_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int, knotsU:List[float], knotsV:List[float], weights:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
 def circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
 def cuboid(verts:List[Point3d], mat:MatId)->Id:
 def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId, tmat:MatId, smat:MatId)->Id:
@@ -189,6 +195,10 @@ KhepriBase.after_connecting(b::FRCAD) =
 const freecad = FRCAD("FreeCAD", freecad_port, freecad_api)
 
 KhepriBase.has_boolean_ops(::Type{FRCAD}) = HasBooleanOps{true}()
+KhepriBase.curve_geometry_capabilities(::Type{FRCAD}) =
+  CurveGeometryCapabilities{true,true,true,true,false}()
+KhepriBase.surface_geometry_capabilities(::Type{FRCAD}) =
+  SurfaceGeometryCapabilities{true,true,true,false}()
 
 KhepriBase.backend(::FRCADRef) = freecad
 KhepriBase.void_ref(b::FRCAD) = -1 % Int32
@@ -200,6 +210,26 @@ KhepriBase.b_line(b::FRCAD, ps, mat) =
 
 KhepriBase.b_polygon(b::FRCAD, ps, mat) =
   @remote(b, line(ps, true, mat))
+
+KhepriBase.b_bezier_curve(b::FRCAD, path::BezierPath, mat) =
+  @remote(b, bezier_curve([seg.control_points for seg in path.segments],
+                          is_closed_path(path),
+                          mat))
+
+KhepriBase.b_bspline_curve(b::FRCAD, path::BSplinePath{Closed,false}, mat) where {Closed} =
+  @remote(b, bspline_curve(path.control_points,
+                           path.degree,
+                           path.knots,
+                           is_closed_path(path),
+                           mat))
+
+KhepriBase.b_nurbs_curve(b::FRCAD, path::NurbsPath, mat) =
+  @remote(b, nurbs_curve(path.control_points,
+                         path.degree,
+                         path.knots,
+                         path.weights,
+                         is_closed_path(path),
+                         mat))
 
 KhepriBase.b_spline(b::FRCAD, ps, v1, v2, mat) =
   #HACK: ignoring v1, v2
@@ -234,19 +264,51 @@ KhepriBase.b_surface_circle(b::FRCAD, c, r, mat) =
 
 KhepriBase.b_surface_grid(b::FRCAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
-	smooth_u && smooth_v ?
-	  @remote(b, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
-	  smooth_u ?
-	  	(closed_u ?
-          vcat([b_quad_strip_closed(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
-	           closed_v ? [b_quad_strip_closed(b, ptss[:,end], ptss[:,1], true, mat)] : []) :
-	      vcat([b_quad_strip(b, ptss[:,i], ptss[:,i+1], true, mat) for i in 1:nv-1],
-	           closed_v ? [b_quad_strip(b, ptss[:,end], ptss[:,1], true, mat)] : [])) :
- 	    (closed_v ?
-           vcat([b_quad_strip_closed(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
-  	         	closed_u ? [b_quad_strip_closed(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : []) :
-  	       vcat([b_quad_strip(b, ptss[i,:], ptss[i+1,:], smooth_v, mat) for i in 1:nu-1],
-  	          	closed_u ? [b_quad_strip(b, ptss[end,:], ptss[1,:], smooth_v, mat)] : []))
+    smooth_u && smooth_v ?
+      @remote(b, quad_surface(vcat(ptss...), nu, nv, closed_u, closed_v, true, mat)) :
+      smooth_u ?
+        (closed_u ?
+          vcat([b_quad_strip_closed(b, ptss[:, i], ptss[:, i + 1], true, mat) for i in 1:nv-1],
+               closed_v ? [b_quad_strip_closed(b, ptss[:, end], ptss[:, 1], true, mat)] : []) :
+          vcat([b_quad_strip(b, ptss[:, i], ptss[:, i + 1], true, mat) for i in 1:nv-1],
+               closed_v ? [b_quad_strip(b, ptss[:, end], ptss[:, 1], true, mat)] : [])) :
+        (closed_v ?
+          vcat([b_quad_strip_closed(b, ptss[i, :], ptss[i + 1, :], smooth_v, mat) for i in 1:nu-1],
+               closed_u ? [b_quad_strip_closed(b, ptss[end, :], ptss[1, :], smooth_v, mat)] : []) :
+          vcat([b_quad_strip(b, ptss[i, :], ptss[i + 1, :], smooth_v, mat) for i in 1:nu-1],
+               closed_u ? [b_quad_strip(b, ptss[end, :], ptss[1, :], smooth_v, mat)] : []))
+  end
+
+freecad_surface_points(s::TensorProductSurface) =
+  reshape(permutedims(s.control_points), :)
+
+freecad_surface_weights(s::BSplineSurface) =
+  isnothing(s.weights) ? Float64[] : reshape(permutedims(s.weights), :)
+
+KhepriBase.b_bezier_surface(b::FRCAD, s::BezierSurface{ClosedU,ClosedV}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, bezier_surface(freecad_surface_points(s), nu, nv,
+                              ClosedU, ClosedV,
+                              mat))
+  end
+
+KhepriBase.b_bspline_surface(b::FRCAD, s::BSplineSurface{ClosedU,ClosedV,false}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, bspline_surface(freecad_surface_points(s), nu, nv,
+                               s.degree_u, s.degree_v,
+                               s.knots_u, s.knots_v,
+                               ClosedU, ClosedV,
+                               mat))
+  end
+
+KhepriBase.b_nurbs_surface(b::FRCAD, s::BSplineSurface{ClosedU,ClosedV,true}, mat) where {ClosedU,ClosedV} =
+  let (nu, nv) = size(s.control_points)
+    @remote(b, nurbs_surface(freecad_surface_points(s), nu, nv,
+                             s.degree_u, s.degree_v,
+                             s.knots_u, s.knots_v,
+                             freecad_surface_weights(s),
+                             ClosedU, ClosedV,
+                             mat))
   end
 
 KhepriBase.b_generic_pyramid_frustum(b::FRCAD, bs, ts, smooth, bmat, tmat, smat) =
