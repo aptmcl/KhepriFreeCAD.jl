@@ -212,7 +212,7 @@ KhepriBase.b_polygon(b::FRCAD, ps, mat) =
   @remote(b, line(ps, true, mat))
 
 KhepriBase.b_bezier_curve(b::FRCAD, path::BezierPath, mat) =
-  @remote(b, bezier_curve([seg.control_points for seg in path.segments],
+  @remote(b, bezier_curve([seg.control_points for seg in path.spans],
                           is_closed_path(path),
                           mat))
 
@@ -321,7 +321,9 @@ KhepriBase.b_cone_frustum(b::FRCAD, cb, rb, h, rt, bmat, tmat, smat) =
   @remote(b, cone_frustum(cb, rb, add_z(cb, h), rt, bmat, tmat, smat))
 
 KhepriBase.b_cylinder(b::FRCAD, cb, r, h, bmat, tmat, smat) =
-  @remote(b, cone_frustum(cb, r, add_z(cb, h), r, bmat, tmat, smat))
+  isnothing(bmat) || isnothing(tmat) ?
+    b_cylinder_surfaces(b, cb, r, h, bmat, tmat, smat) :
+    @remote(b, cone_frustum(cb, r, add_z(cb, h), r, bmat, tmat, smat))
 
 KhepriBase.b_box(b::FRCAD, c, dx, dy, dz, mat) =
   @remote(b, box(c, vx(1, c.cs), vy(1, c.cs), dx, dy, dz, mat))
