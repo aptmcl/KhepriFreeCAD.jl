@@ -51,6 +51,9 @@ using Test
     @test report.import_mapping.storage == :remote_refs
     @test report.import_mapping.all_shapes
     @test report.import_mapping.create_shape
+    @test report.operations.closest_points_path_path
+    @test report.operations.project_point_surface
+    @test report.operations.classify_region_point
   end
 
   if get(ENV, "KHEPRI_FREECAD_EXACT_GEOMETRY_TESTS", "0") == "1"

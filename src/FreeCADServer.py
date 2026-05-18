@@ -445,6 +445,42 @@ def curve_sample_points(name:Id, samples:int)->List[Point3d]:
         pts.append(pts[0])
     return pts
 
+def _point_shape(p):
+    return Part.Vertex(p)
+
+def _first_distance_pair(shape0, shape1):
+    dist, vectors, infos = shape0.distToShape(shape1)
+    if vectors:
+        return dist, vectors[0][0], vectors[0][1]
+    return dist, Vector(0, 0, 0), Vector(0, 0, 0)
+
+def closest_points_between_shapes(id0:Id, id1:Id)->List[Point3d]:
+    dist, p0, p1 = _first_distance_pair(shape_from_id(id0), shape_from_id(id1))
+    return [p0, p1]
+
+def project_points_to_shape(id:Id, pts:List[Point3d])->List[Point3d]:
+    shape = shape_from_id(id)
+    projected = []
+    for p in pts:
+        dist, p0, p1 = _first_distance_pair(_point_shape(p), shape)
+        projected.append(p1)
+    return projected
+
+def classify_point_on_shape(id:Id, p:Point3d, tolerance:float)->int:
+    shape = shape_from_id(id)
+    try:
+        if len(shape.Solids) > 0 and shape.isInside(p, tolerance, True):
+            return 1
+    except Exception:
+        pass
+    dist, p0, p1 = _first_distance_pair(_point_shape(p), shape)
+    if dist > tolerance:
+        return 0
+    if len(shape.Faces) > 0 and len(shape.Edges) > 0:
+        edge_distance = min(_first_distance_pair(_point_shape(p), edge)[0] for edge in shape.Edges)
+        return 2 if edge_distance <= tolerance else 1
+    return 2
+
 def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
     n = len(ps)-1
     faces = [face([ps[i], ps[i+1], pivot]) for i in range(0, n)]

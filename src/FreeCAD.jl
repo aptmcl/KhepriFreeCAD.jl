@@ -101,6 +101,9 @@ def circle_radius(name:Id)->Length:
 def arc_start_angle(name:Id)->float:
 def arc_end_angle(name:Id)->float:
 def curve_sample_points(name:Id, samples:int)->List[Point3d]:
+def closest_points_between_shapes(id0:Id, id1:Id)->List[Point3d]:
+def project_points_to_shape(id:Id, pts:List[Point3d])->List[Point3d]:
+def classify_point_on_shape(id:Id, p:Point3d, tolerance:float)->int:
 def intersection_points(id0:Id, id1:Id)->List[Point3d]:
 def intersection_polylines(id0:Id, id1:Id, samples:int)->List[List[Point3d]]:
 def circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
@@ -333,7 +336,7 @@ KhepriBase.b_nurbs_surface(b::FRCAD, s::BSplineSurface{ClosedU,ClosedV,true}, ma
   end
 
 const FRCAD_GEOMETRY_INTERSECTION_SAMPLES = 64
-const FRCADIntersectionSurface = Union{Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
+const FRCADIntersectionSurface = Union{PlaneSurface,Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
 
 function freecad_delete_temp_refs(b::FRCAD, refs...)
   for ref in refs
@@ -378,13 +381,21 @@ function freecad_intersection_set(a, b, points, polylines, opts; curve_kind::Sym
 end
 
 KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Path, ::Path) =
-  op in (:intersections, :section)
+  op in (:intersections, :section, :closest_points)
 KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Path, ::FRCADIntersectionSurface) =
   op in (:intersections, :section)
 KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::FRCADIntersectionSurface, ::Path) =
   op in (:intersections, :section)
 KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::FRCADIntersectionSurface, ::FRCADIntersectionSurface) =
   op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Loc, ::Path) =
+  op in (:project, :closest_points)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Path, ::Loc) =
+  op in (:closest_points, :classify)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Loc, ::FRCADIntersectionSurface) =
+  op in (:project, :closest_points)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::FRCADIntersectionSurface, ::Loc) =
+  op in (:closest_points, :classify)
 
 function KhepriBase.b_intersections(b::FRCAD, a::Path, c::Path, opts::GeometryOperationOptions)
   ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
@@ -438,6 +449,83 @@ function KhepriBase.b_section(b::FRCAD, a, c, opts::GeometryOperationOptions)
   r = KhepriBase.b_intersections(b, a, c, opts)
   IntersectionSet(a, c, IntersectionElement[e for e in r.elements if e isa CurveIntersection];
                   tolerance=r.tolerance, method=r.method, exactness=r.exactness)
+end
+
+function KhepriBase.b_project_geometry(b::FRCAD, p::Loc, target::Path, opts::GeometryOperationOptions)
+  tr = KhepriBase.b_stroke(b, target, KhepriBase.void_ref(b))
+  try
+    projected = only(@remote(b, project_points_to_shape(tr, [p])))
+    ProjectionResult(p, target, projected, (;), distance(p, projected),
+                     :backend, :toleranced)
+  finally
+    freecad_delete_temp_refs(b, tr)
+  end
+end
+
+function KhepriBase.b_project_geometry(b::FRCAD, p::Loc, target::SurfaceGeometry, opts::GeometryOperationOptions)
+  tr = KhepriBase.b_surface(b, target, KhepriBase.void_ref(b))
+  try
+    projected = only(@remote(b, project_points_to_shape(tr, [p])))
+    ProjectionResult(p, target, projected, (;), distance(p, projected),
+                     :backend, :toleranced)
+  finally
+    freecad_delete_temp_refs(b, tr)
+  end
+end
+
+function KhepriBase.b_closest_points(b::FRCAD, p::Loc, target::Path, opts::GeometryOperationOptions)
+  proj = KhepriBase.b_project_geometry(b, p, target, opts)
+  ClosestPointsResult(p, proj.geometry, nothing, nothing,
+                      proj.distance, proj.method, proj.exactness)
+end
+
+KhepriBase.b_closest_points(b::FRCAD, target::Path, p::Loc, opts::GeometryOperationOptions) =
+  let r = KhepriBase.b_closest_points(b, p, target, opts)
+    ClosestPointsResult(r.second, r.first, r.second_parameter, r.first_parameter,
+                        r.distance, r.method, r.exactness)
+  end
+
+function KhepriBase.b_closest_points(b::FRCAD, p::Loc, target::SurfaceGeometry, opts::GeometryOperationOptions)
+  proj = KhepriBase.b_project_geometry(b, p, target, opts)
+  ClosestPointsResult(p, proj.geometry, nothing, nothing,
+                      proj.distance, proj.method, proj.exactness)
+end
+
+KhepriBase.b_closest_points(b::FRCAD, target::SurfaceGeometry, p::Loc, opts::GeometryOperationOptions) =
+  let r = KhepriBase.b_closest_points(b, p, target, opts)
+    ClosestPointsResult(r.second, r.first, r.second_parameter, r.first_parameter,
+                        r.distance, r.method, r.exactness)
+  end
+
+function KhepriBase.b_closest_points(b::FRCAD, a::Path, c::Path, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_stroke(b, c, KhepriBase.void_ref(b))
+  try
+    pts = @remote(b, closest_points_between_shapes(ar, cr))
+    ClosestPointsResult(pts[1], pts[2], nothing, nothing,
+                        distance(pts[1], pts[2]), :backend, :toleranced)
+  finally
+    freecad_delete_temp_refs(b, ar, cr)
+  end
+end
+
+function KhepriBase.b_classify_geometry(b::FRCAD, path::Path, p::Loc, opts::GeometryOperationOptions)
+  pr = KhepriBase.b_stroke(b, path, KhepriBase.void_ref(b))
+  try
+    @remote(b, classify_point_on_shape(pr, p, opts.tolerance)) == 0 ? :outside : :on
+  finally
+    freecad_delete_temp_refs(b, pr)
+  end
+end
+
+function KhepriBase.b_classify_geometry(b::FRCAD, surface::SurfaceGeometry, p::Loc, opts::GeometryOperationOptions)
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    code = @remote(b, classify_point_on_shape(sr, p, opts.tolerance))
+    code == 1 ? :inside : code == 2 ? :boundary : :outside
+  finally
+    freecad_delete_temp_refs(b, sr)
+  end
 end
 
 KhepriBase.b_generic_pyramid_frustum(b::FRCAD, bs, ts, smooth, bmat, tmat, smat) =
