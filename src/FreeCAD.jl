@@ -328,6 +328,23 @@ function freecad_delete_temp_refs(b::FRCAD, refs...)
   end
 end
 
+function freecad_collinear_points(pts, tol)
+  length(pts) <= 2 && return true
+  p0 = in_world(pts[1])
+  p1 = in_world(pts[end])
+  dx, dy, dz = p1.x - p0.x, p1.y - p0.y, p1.z - p0.z
+  denom = max(sqrt(dx^2 + dy^2 + dz^2), tol)
+  all(pts[2:end-1]) do p
+    q = in_world(p)
+    qx, qy, qz = q.x - p0.x, q.y - p0.y, q.z - p0.z
+    cx, cy, cz = qy * dz - qz * dy, qz * dx - qx * dz, qx * dy - qy * dx
+    sqrt(cx^2 + cy^2 + cz^2) / denom <= tol
+  end
+end
+
+freecad_polyline_curve(pts, tol) =
+  freecad_collinear_points(pts, tol) ? line_path(pts[1], pts[end]) : polygonal_path(Loc[pts...])
+
 function freecad_intersection_set(a, b, points, polylines, opts; curve_kind::Symbol=:section)
   elements = IntersectionElement[]
   for p in points
@@ -335,7 +352,7 @@ function freecad_intersection_set(a, b, points, polylines, opts; curve_kind::Sym
   end
   for pts in polylines
     length(pts) >= 2 || continue
-    push!(elements, CurveIntersection(polygonal_path(Loc[pts...]); kind=curve_kind))
+    push!(elements, CurveIntersection(freecad_polyline_curve(pts, opts.tolerance); kind=curve_kind))
   end
   IntersectionSet(a, b, elements; tolerance=opts.tolerance,
                   method=:backend, exactness=:toleranced)
