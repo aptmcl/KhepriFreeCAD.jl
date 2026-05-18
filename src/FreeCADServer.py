@@ -25,6 +25,7 @@ def warn(msg):
     FreeCAD.Console.PrintMessage("\n")
 
 doc = FreeCAD.newDocument()
+current_collection = "Default"
 
 shape_counter = 0
 def new_id()->Id:
@@ -83,11 +84,36 @@ def addObject(type, shape):
 #     global current_collection
 #     current_collection = D.collections[name]
 #
-# #def all_shapes_in_collection(name:str)->List[Id]:
-# def delete_all_shapes_in_collection(name:str)->None:
-#     D.batch_remove(D.collections[name].objects)
-#     D.orphans_purge(do_linked_ids=False)
-#
+def find_or_create_collection(name:str, active:bool, color:RGBA)->str:
+    return name
+
+def set_collection_visible(name:str, visible:bool)->None:
+    return None
+
+def get_current_collection()->str:
+    return current_collection
+
+def set_current_collection(name:str)->None:
+    global current_collection
+    current_collection = name
+
+def _object_id(obj):
+    return int(obj.Name[1:]) if obj.Name.startswith("k") and obj.Name[1:].isdigit() else None
+
+def all_shapes()->List[Id]:
+    ids = []
+    for obj in doc.Objects:
+        id = _object_id(obj)
+        if id is not None:
+            ids.append(id)
+    return ids
+
+def all_shapes_in_collection(name:str)->List[Id]:
+    return all_shapes()
+
+def delete_all_shapes_in_collection(name:str)->None:
+    delete_all_shapes()
+
 def delete_all_shapes()->None:
     for obj in doc.Objects:
         doc.removeObject(obj.Name)
@@ -319,6 +345,106 @@ def nurbs_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degr
     surface = bspline_surface_from_data(controlPoints, nU, nV, degreeU, degreeV, knotsU, knotsV, weights, closedU, closedV)
     return addObject("Part::Feature", surface.toShape())
 
+def _first_edge(shape):
+    return shape.Edges[0] if len(shape.Edges) > 0 else None
+
+def _edge_type(edge):
+    try:
+        return edge.Curve.TypeId
+    except Exception:
+        return ""
+
+def _is_line_edge(edge):
+    return "Line" in _edge_type(edge)
+
+def _is_circle_edge(edge):
+    return "Circle" in _edge_type(edge)
+
+def _shape_is_closed(shape):
+    try:
+        return len(shape.Wires) > 0 and shape.Wires[0].isClosed()
+    except Exception:
+        try:
+            return len(shape.Edges) == 1 and shape.Edges[0].isClosed()
+        except Exception:
+            return False
+
+def _shape_wire_vertices(shape):
+    if len(shape.Wires) > 0:
+        try:
+            verts = [v.Point for v in shape.Wires[0].OrderedVertexes]
+        except Exception:
+            verts = [v.Point for v in Part.Wire(shape.Edges).OrderedVertexes]
+    elif len(shape.Edges) == 1:
+        verts = [shape.Edges[0].Vertexes[0].Point, shape.Edges[0].Vertexes[-1].Point]
+    else:
+        verts = [v.Point for v in shape.Vertexes]
+    if len(verts) > 1 and (verts[0] - verts[-1]).Length <= 1e-7:
+        verts = verts[:-1]
+    return verts
+
+def shape_code(name:Id)->int:
+    shape = shape_from_id(name)
+    if len(shape.Vertexes) == 1 and len(shape.Edges) == 0:
+        return 1
+    if len(shape.Edges) == 1 and _is_circle_edge(shape.Edges[0]):
+        edge = shape.Edges[0]
+        span = abs(edge.LastParameter - edge.FirstParameter)
+        return 2 if abs(span - 2 * math.pi) <= 1e-7 or edge.isClosed() else 9
+    if len(shape.Edges) > 0 and all(_is_line_edge(edge) for edge in shape.Edges):
+        return 103 if _shape_is_closed(shape) else 3
+    if len(shape.Edges) > 0:
+        return 107 if _shape_is_closed(shape) else 7
+    if len(shape.Faces) > 0:
+        return 40
+    return 0
+
+def point_position(name:Id)->Point3d:
+    return shape_from_id(name).Vertexes[0].Point
+
+def line_vertices(name:Id)->List[Point3d]:
+    return _shape_wire_vertices(shape_from_id(name))
+
+def _circle_curve(name:Id):
+    edge = _first_edge(shape_from_id(name))
+    if edge is None:
+        raise Exception("Shape has no circular edge")
+    return edge.Curve
+
+def circle_center(name:Id)->Point3d:
+    return _circle_curve(name).Center
+
+def circle_normal(name:Id)->Vector3d:
+    return _circle_curve(name).Axis
+
+def circle_radius(name:Id)->Length:
+    return _circle_curve(name).Radius
+
+def arc_start_angle(name:Id)->float:
+    return _first_edge(shape_from_id(name)).FirstParameter
+
+def arc_end_angle(name:Id)->float:
+    return _first_edge(shape_from_id(name)).LastParameter
+
+def curve_sample_points(name:Id, samples:int)->List[Point3d]:
+    shape = shape_from_id(name)
+    if len(shape.Edges) == 0:
+        return []
+    pts = []
+    per_edge = max(2, int(math.ceil(samples / len(shape.Edges))))
+    for edge in shape.Edges:
+        try:
+            edge_pts = edge.discretize(Number=per_edge)
+        except Exception:
+            edge_pts = [edge.Vertexes[0].Point, edge.Vertexes[-1].Point]
+        if pts and edge_pts and (pts[-1] - edge_pts[0]).Length <= 1e-7:
+            pts.extend(edge_pts[1:])
+        else:
+            pts.extend(edge_pts)
+    if _shape_is_closed(shape) and pts and (pts[0] - pts[-1]).Length > 1e-7:
+        pts.append(pts[0])
+    return pts
+
 def ngon(ps:List[Point3d], pivot:Point3d, smooth:bool, mat:MatId)->Id:
     n = len(ps)-1
     faces = [face([ps[i], ps[i+1], pivot]) for i in range(0, n)]
@@ -333,6 +459,9 @@ def polygon_with_holes(pss:List[List[Point3d]], mat:MatId)->Id:
 
 def circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
     return addObject("Part::Circle", Part.makeCircle(r, c, v))
+
+def arc(c:Point3d, v:Vector3d, r:Length, startAngle:float, endAngle:float, mat:MatId)->Id:
+    return addObject("Part::Circle", Part.makeCircle(r, c, v, math.degrees(startAngle), math.degrees(endAngle)))
 
 def cuboid(verts:List[Point3d], mat:MatId)->Id:
     return addObject("Part::Feature",

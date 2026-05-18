@@ -65,6 +65,8 @@ def delete_shape(name:Id)->None:
 def select_shape(name:Id)->None:
 def deselect_shape(name:Id)->None:
 def deselect_all_shapes()->None:
+def all_shapes()->List[Id]:
+def all_shapes_in_collection(name:str)->List[Id]:
 def get_material(name:str)->MatId:
 def get_freecadkit_material(ref:str)->MatId:
 def new_material(name:str, diffuse_color:RGBA, metallic:float, specular:float, roughness:float, clearcoat:float, clearcoat_roughness:float, ior:float, transmission:float, transmission_roughness:float, emission:RGBA, emission_strength:float)->MatId:
@@ -77,6 +79,7 @@ def bspline_curve(controlPoints:List[Point3d], degree:int, knots:List[float], cl
 def nurbs_curve(controlPoints:List[Point3d], degree:int, knots:List[float], weights:List[float], closed:bool, mat:MatId)->Id:
 def draft_circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
 def draft_spline(ps:List[Point3d], closed:bool, mat:MatId)->Id:
+def arc(c:Point3d, v:Vector3d, r:Length, startAngle:float, endAngle:float, mat:MatId)->Id:
 def objmesh(verts:List[Point3d], edges:List[Tuple[int,int]], faces:List[List[int]], smooth:bool, mat:MatId)->Id:
 def trig(p1:Point3d, p2:Point3d, p3:Point3d, mat:MatId)->Id:
 def quad(p1:Point3d, p2:Point3d, p3:Point3d, p4:Point3d, mat:MatId)->Id:
@@ -89,6 +92,15 @@ def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool,
 def bezier_surface(controlPoints:List[Point3d], nU:int, nV:int, closedU:bool, closedV:bool, mat:MatId)->Id:
 def bspline_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int, knotsU:List[float], knotsV:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
 def nurbs_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int, knotsU:List[float], knotsV:List[float], weights:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
+def shape_code(name:Id)->int:
+def point_position(name:Id)->Point3d:
+def line_vertices(name:Id)->List[Point3d]:
+def circle_center(name:Id)->Point3d:
+def circle_normal(name:Id)->Vector3d:
+def circle_radius(name:Id)->Length:
+def arc_start_angle(name:Id)->float:
+def arc_end_angle(name:Id)->float:
+def curve_sample_points(name:Id, samples:int)->List[Point3d]:
 def intersection_points(id0:Id, id1:Id)->List[Point3d]:
 def intersection_polylines(id0:Id, id1:Id, samples:int)->List[List[Point3d]]:
 def circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
@@ -196,6 +208,7 @@ KhepriBase.after_connecting(b::FRCAD) =
 
 const freecad = FRCAD("FreeCAD", freecad_port, freecad_api)
 
+KhepriBase.shape_storage_type(::Type{FRCAD}) = RemoteShapeStorage()
 KhepriBase.has_boolean_ops(::Type{FRCAD}) = HasBooleanOps{true}()
 KhepriBase.curve_geometry_capabilities(::Type{FRCAD}) =
   CurveGeometryCapabilities{true,true,true,true,false}()
@@ -263,6 +276,12 @@ KhepriBase.b_surface_polygon_with_holes(b::FRCAD, ps, qss, mat) =
 
 KhepriBase.b_surface_circle(b::FRCAD, c, r, mat) =
   @remote(b, circle(c, vz(1, c.cs), r, mat))
+
+KhepriBase.b_circle(b::FRCAD, c, r, mat) =
+  @remote(b, circle(c, vz(1, c.cs), r, mat))
+
+KhepriBase.b_arc(b::FRCAD, c, r, start_angle, amplitude, mat) =
+  @remote(b, arc(c, vz(1, c.cs), r, start_angle, start_angle + amplitude, mat))
 
 KhepriBase.b_surface_grid(b::FRCAD, ptss, closed_u, closed_v, smooth_u, smooth_v, mat) =
   let (nu, nv) = size(ptss)
@@ -528,9 +547,40 @@ KhepriBase.b_current_layer_ref(b::FRCAD) =
 KhepriBase.b_current_layer_ref(b::FRCAD, layer) =
   @remote(b, set_current_collection(layer))
 KhepriBase.b_all_shapes_in_layer(b::FRCAD, layer) =
-  @remote(b, all_shapes_in_collection(layer))
+  Shape[get_or_create_shape_from_ref_value(b, r) for r in @remote(b, all_shapes_in_collection(layer))]
 KhepriBase.b_delete_all_shapes_in_layer(b::FRCAD, layer) =
   @remote(b, delete_all_shapes_in_collection(layer))
+
+KhepriBase.b_existing_shape_refs(::RemoteShapeStorage, b::FRCAD) =
+  @remote(b, all_shapes())
+
+KhepriBase.b_create_shape_from_ref_value(b::FRCAD, r) =
+  let code = @remote(b, shape_code(r))
+    if code == 1
+      point(@remote(b, point_position(r)))
+    elseif code == 2
+      circle(loc_from_o_vz(@remote(b, circle_center(r)), @remote(b, circle_normal(r))),
+             @remote(b, circle_radius(r)))
+    elseif 3 <= code <= 6
+      line(@remote(b, line_vertices(r)))
+    elseif code == 7
+      spline(@remote(b, curve_sample_points(r, 16)))
+    elseif code == 9
+      let start_angle = mod(@remote(b, arc_start_angle(r)), 2pi),
+          end_angle = mod(@remote(b, arc_end_angle(r)), 2pi)
+        arc(loc_from_o_vz(@remote(b, circle_center(r)), @remote(b, circle_normal(r))),
+            @remote(b, circle_radius(r)), start_angle, mod(end_angle - start_angle, 2pi))
+      end
+    elseif 103 <= code <= 106
+      polygon(@remote(b, line_vertices(r)))
+    elseif code == 107
+      closed_spline(@remote(b, curve_sample_points(r, 16))[1:end-1])
+    elseif 40 <= code <= 41
+      surface(frontier=Shape1D[])
+    else
+      unknown(r)
+    end
+  end
 
 KhepriBase.b_set_view(b::FRCAD, camera::Loc, target::Loc, lens::Real, aperture::Real) =
   @remote(b, set_view(camera, target, lens))

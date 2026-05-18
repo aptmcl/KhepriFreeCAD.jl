@@ -46,6 +46,13 @@ using Test
     @test !KhepriBase.supports_exact_trimmed_surfaces(KhepriFreeCAD.FRCAD)
   end
 
+  @testset "Backend import mapping" begin
+    report = KhepriBase.backend_geometry_mapping(freecad)
+    @test report.import_mapping.storage == :remote_refs
+    @test report.import_mapping.all_shapes
+    @test report.import_mapping.create_shape
+  end
+
   if get(ENV, "KHEPRI_FREECAD_EXACT_GEOMETRY_TESTS", "0") == "1"
     @testset "Exact Geometry (FreeCAD)" begin
       include(joinpath(dirname(pathof(KhepriBase)), "..", "test", "ExactGeometrySmokeTests.jl"))
