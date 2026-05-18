@@ -184,6 +184,45 @@ def bspline_curve(controlPoints:List[Point3d], degree:int, knots:List[float], cl
 
 def nurbs_curve(controlPoints:List[Point3d], degree:int, knots:List[float], weights:List[float], closed:bool, mat:MatId)->Id:
     return addObject("Part::Line", bspline_curve_from_data(controlPoints, degree, knots, weights, closed).toShape())
+
+def shape_from_id(name:Id):
+    return doc.getObject("k" + str(name)).Shape
+
+def intersection_shape(id0:Id, id1:Id):
+    return shape_from_id(id0).section(shape_from_id(id1))
+
+def dedupe_vectors(points, tol=1e-7):
+    result = []
+    for p in points:
+        if not any((p - q).Length <= tol for q in result):
+            result.append(p)
+    return result
+
+def dedupe_consecutive_vectors(points, tol=1e-7):
+    result = []
+    for p in points:
+        if len(result) == 0 or (p - result[-1]).Length > tol:
+            result.append(p)
+    if len(result) > 1 and (result[0] - result[-1]).Length <= tol:
+        result[-1] = result[0]
+    return result
+
+def intersection_points(id0:Id, id1:Id)->List[Point3d]:
+    shape = intersection_shape(id0, id1)
+    return dedupe_vectors([vertex.Point for vertex in shape.Vertexes])
+
+def intersection_polylines(id0:Id, id1:Id, samples:int)->List[List[Point3d]]:
+    shape = intersection_shape(id0, id1)
+    polylines = []
+    for edge in shape.Edges:
+        try:
+            pts = edge.discretize(Number=max(2, samples))
+        except Exception:
+            pts = [edge.Vertexes[0].Point, edge.Vertexes[-1].Point]
+        pts = dedupe_consecutive_vectors(pts)
+        if len(pts) >= 2:
+            polylines.append(pts)
+    return polylines
 # def nurbs(order:int, ps:List[Point3d], closed:bool, mat:MatId)->Id:
 #     #print(order, ps, closed)
 #     id, name = new_id()

@@ -89,6 +89,8 @@ def quad_surface(ps:List[Point3d], nu:int, nv:int, closed_u:bool, closed_v:bool,
 def bezier_surface(controlPoints:List[Point3d], nU:int, nV:int, closedU:bool, closedV:bool, mat:MatId)->Id:
 def bspline_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int, knotsU:List[float], knotsV:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
 def nurbs_surface(controlPoints:List[Point3d], nU:int, nV:int, degreeU:int, degreeV:int, knotsU:List[float], knotsV:List[float], weights:List[float], closedU:bool, closedV:bool, mat:MatId)->Id:
+def intersection_points(id0:Id, id1:Id)->List[Point3d]:
+def intersection_polylines(id0:Id, id1:Id, samples:int)->List[List[Point3d]]:
 def circle(c:Point3d, v:Vector3d, r:Length, mat:MatId)->Id:
 def cuboid(verts:List[Point3d], mat:MatId)->Id:
 def pyramid_frustum(bs:List[Point3d], ts:List[Point3d], smooth:bool, bmat:MatId, tmat:MatId, smat:MatId)->Id:
@@ -310,6 +312,97 @@ KhepriBase.b_nurbs_surface(b::FRCAD, s::BSplineSurface{ClosedU,ClosedV,true}, ma
                              ClosedU, ClosedV,
                              mat))
   end
+
+const FRCAD_GEOMETRY_INTERSECTION_SAMPLES = 64
+const FRCADIntersectionSurface = Union{Region,BezierSurface,BSplineSurface,TrimmedSurface{PlaneSurface}}
+
+function freecad_delete_temp_refs(b::FRCAD, refs...)
+  for ref in refs
+    if ref isa AbstractVector
+      for r in ref
+        KhepriBase.b_delete_ref(b, r)
+      end
+    else
+      KhepriBase.b_delete_ref(b, ref)
+    end
+  end
+end
+
+function freecad_intersection_set(a, b, points, polylines, opts; curve_kind::Symbol=:section)
+  elements = IntersectionElement[]
+  for p in points
+    push!(elements, PointIntersection(p; kind=:transversal))
+  end
+  for pts in polylines
+    length(pts) >= 2 || continue
+    push!(elements, CurveIntersection(polygonal_path(Loc[pts...]); kind=curve_kind))
+  end
+  IntersectionSet(a, b, elements; tolerance=opts.tolerance,
+                  method=:backend, exactness=:toleranced)
+end
+
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Path, ::Path) =
+  op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::Path, ::FRCADIntersectionSurface) =
+  op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::FRCADIntersectionSurface, ::Path) =
+  op in (:intersections, :section)
+KhepriBase.supports_geometry_operation(::FRCAD, op::Symbol, ::FRCADIntersectionSurface, ::FRCADIntersectionSurface) =
+  op in (:intersections, :section)
+
+function KhepriBase.b_intersections(b::FRCAD, a::Path, c::Path, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_stroke(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_stroke(b, c, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, intersection_points(ar, cr))
+    polylines = @remote(b, intersection_polylines(ar, cr, FRCAD_GEOMETRY_INTERSECTION_SAMPLES))
+    freecad_intersection_set(a, c, points, polylines, opts; curve_kind=:overlap)
+  finally
+    freecad_delete_temp_refs(b, ar, cr)
+  end
+end
+
+function KhepriBase.b_intersections(b::FRCAD, curve::Path, surface::SurfaceGeometry, opts::GeometryOperationOptions)
+  cr = KhepriBase.b_stroke(b, curve, KhepriBase.void_ref(b))
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, intersection_points(cr, sr))
+    polylines = @remote(b, intersection_polylines(cr, sr, FRCAD_GEOMETRY_INTERSECTION_SAMPLES))
+    freecad_intersection_set(curve, surface, points, polylines, opts; curve_kind=:overlap)
+  finally
+    freecad_delete_temp_refs(b, cr, sr)
+  end
+end
+
+function KhepriBase.b_intersections(b::FRCAD, surface::SurfaceGeometry, curve::Path, opts::GeometryOperationOptions)
+  cr = KhepriBase.b_stroke(b, curve, KhepriBase.void_ref(b))
+  sr = KhepriBase.b_surface(b, surface, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, intersection_points(cr, sr))
+    polylines = @remote(b, intersection_polylines(cr, sr, FRCAD_GEOMETRY_INTERSECTION_SAMPLES))
+    freecad_intersection_set(surface, curve, points, polylines, opts; curve_kind=:overlap)
+  finally
+    freecad_delete_temp_refs(b, cr, sr)
+  end
+end
+
+function KhepriBase.b_intersections(b::FRCAD, a::SurfaceGeometry, c::SurfaceGeometry, opts::GeometryOperationOptions)
+  ar = KhepriBase.b_surface(b, a, KhepriBase.void_ref(b))
+  cr = KhepriBase.b_surface(b, c, KhepriBase.void_ref(b))
+  try
+    points = @remote(b, intersection_points(ar, cr))
+    polylines = @remote(b, intersection_polylines(ar, cr, FRCAD_GEOMETRY_INTERSECTION_SAMPLES))
+    freecad_intersection_set(a, c, points, polylines, opts; curve_kind=:section)
+  finally
+    freecad_delete_temp_refs(b, ar, cr)
+  end
+end
+
+function KhepriBase.b_section(b::FRCAD, a, c, opts::GeometryOperationOptions)
+  r = KhepriBase.b_intersections(b, a, c, opts)
+  IntersectionSet(a, c, IntersectionElement[e for e in r.elements if e isa CurveIntersection];
+                  tolerance=r.tolerance, method=r.method, exactness=r.exactness)
+end
 
 KhepriBase.b_generic_pyramid_frustum(b::FRCAD, bs, ts, smooth, bmat, tmat, smat) =
   @remote(b, pyramid_frustum(bs, ts, smooth, bmat, tmat, smat))
